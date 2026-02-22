@@ -1079,7 +1079,7 @@ coroutine.wrap(function()
             end
         end
         _G.totalWeightsNormal = totalWeights
-        WaitTime.Text = "Wait Time: " .. tostring(0.000886 * totalWeights)
+        WaitTime.Text = "Wait Time: " .. tostring(0.00065 * totalWeights)
         wait(1)
     end
 end)()
@@ -1089,7 +1089,7 @@ Farm.MouseButton1Click:Connect(function()
         pcall(function()
             _G.farmer = true
             while _G.farmer do
-                local farmWaitTime = 0.000886 * (_G.totalWeightsNormal or 0)
+                local farmWaitTime = 0.00065 * (_G.totalWeightsNormal or 0)
                 local tools = LocalPlayer.Character and LocalPlayer.Character:GetChildren() or {}
                 local batchCount = 0
                 for _, tool in pairs(tools) do
@@ -1097,9 +1097,9 @@ Farm.MouseButton1Click:Connect(function()
                     if tool.Name == 'Double Weight' and tool:IsA('Tool') then
                         tool:Activate()
                         batchCount = batchCount + 1
-                        if batchCount >= 50 then
+                        if batchCount >= 100 then
                             batchCount = 0
-                            task.wait(0.005)
+                            task.wait(0.010)
                         end
                     end
                 end
@@ -1199,7 +1199,7 @@ coroutine.wrap(function()
             end
         end
         _G.totalWeightsPing = totalWeights
-        WaitTime_2.Text = "Wait Time: " .. tostring(0.00092 * totalWeights)
+        WaitTime_2.Text = "Wait Time: " .. tostring(0.00065 * totalWeights)
         wait(1)
     end
 end)()
@@ -1238,7 +1238,7 @@ local function RunPingFarmLoop()
                 pcall(function()
                     _G.farmer2 = true
                     while _G.farmer2 do
-                        local farmWaitTime = 0.00092 * (_G.totalWeightsPing or 0)
+                        local farmWaitTime = 0.00065 * (_G.totalWeightsPing or 0)
                         local tools = LocalPlayer.Character and LocalPlayer.Character:GetChildren() or {}
                         local batchCount = 0
                         for _, tool in pairs(tools) do
@@ -1246,9 +1246,9 @@ local function RunPingFarmLoop()
                             if tool.Name == 'Double Weight' then
                                 tool:Activate()
                                 batchCount = batchCount + 1
-                                if batchCount >= 50 then
+                                if batchCount >= 100 then
                                     batchCount = 0
-                                    task.wait(0.005)
+                                    task.wait(0.010)
                                 end
                             end
                         end
@@ -1271,7 +1271,7 @@ local function RunPingFarmLoop()
     -- [MELHORIA 1] Lê _G.PingLimit dinamicamente a cada iteração do loop
     -- Permite alterar o limite de ping enquanto o farm está rodando
     while _G.pingFarmLoop do
-        local checkInterval = 0.00092 * (_G.totalWeightsPing or 0)
+        local checkInterval = 0.00065 * (_G.totalWeightsPing or 0)
         local ok, currentPing = pcall(function()
             return StatsService.Network.ServerStatsItem['Data Ping']:GetValue()
         end)
@@ -1306,6 +1306,7 @@ end
 Farm_2.MouseButton1Click:Connect(function()
     if _G.pingFarmLoop then return end
     _G.pingFarmLoop = true
+    _G.farmSessionActive = true
     coroutine.wrap(function()
         RunPingFarmLoop()
     end)()
@@ -1314,6 +1315,7 @@ end)
 StopFarm_2.MouseButton1Click:Connect(function()
     _G.pingFarmLoop = false
     _G.farmer2 = false
+    _G.farmSessionActive = false
 end)
 
 -- [MELHORIA 2 do Anonymous] Auto Farm agora espera _G.dupeFinished == true
@@ -1365,6 +1367,7 @@ AutoFarm.MouseButton1Click:Connect(function()
 
             -- Inicia Ping Farm com _G.PingLimit dinâmico
             _G.pingFarmLoop = true
+            _G.farmSessionActive = true
             RunPingFarmLoop()
         end)()
     else
@@ -1372,6 +1375,7 @@ AutoFarm.MouseButton1Click:Connect(function()
         autoFarmEnabled = false
         _G.pingFarmLoop = false
         _G.farmer2 = false
+        _G.farmSessionActive = false
     end
 end)
 
@@ -1788,8 +1792,6 @@ end)()
 
 coroutine.wrap(function()
     local startTime = nil
-    local accumulatedTime = 0  -- tempo acumulado antes de pausas
-    local wasActive = false    -- estado anterior do farm
 
     local function FormatTime(t)
         return string.format('%02i', t)
@@ -1806,26 +1808,12 @@ coroutine.wrap(function()
     end
 
     while true do
-        local isActive = _G.farmer or _G.farmer2
-
-        if isActive and not wasActive then
-            -- Farm acabou de retomar: inicia contagem a partir do acumulado
-            startTime = os.clock()
-        elseif not isActive and wasActive then
-            -- Farm acabou de pausar: salva o tempo rodado até agora
-            if startTime then
-                accumulatedTime = accumulatedTime + (os.clock() - startTime)
-                startTime = nil
-            end
-        end
-
-        if isActive and startTime then
-            local elapsedTime = accumulatedTime + (os.clock() - startTime)
+        if _G.farmer or _G.farmer2 then
+            if not startTime then startTime = os.time() end
+            local elapsedTime = os.time() - startTime
             Spw_2.Text = 'Time Farming: ' .. ConvertToDHMS(elapsedTime)
         end
-
-        wasActive = isActive
-        task.wait(0.5)
+        task.wait(1)
     end
 end)()
 
