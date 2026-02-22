@@ -1025,7 +1025,6 @@ ButtonTab5.MouseButton1Click:Connect(function() ShowTab(Tab5) SetActiveTab(Butto
 -- ============================================================
 local NumberSuffixes = {'', 'K', 'M', 'B', 'T'}
 
--- FormatNumber: usa math.floor internamente (trunca)
 local function FormatNumber(number, decimalPlaces)
     local exponent = math.floor(math.log(math.max(1, math.abs(number)), 1000))
     local suffix = NumberSuffixes[1 + exponent] or 'e+' .. exponent
@@ -1033,8 +1032,6 @@ local function FormatNumber(number, decimalPlaces)
     return ('%.' .. decimalPlaces .. 'f%s'):format(scaledNumber, suffix)
 end
 
--- FormatStrength: trunca para 2 casas, nunca arredonda para cima
--- Ex: 59860900800 → "59.86B" e nunca "59.90B"
 local function FormatStrength(strengthValue)
     local formattedValue
     if strengthValue >= 1000000000000 then
@@ -1186,6 +1183,10 @@ end)
 -- TAB 2 - PING FARM
 -- ============================================================
 
+-- [MELHORIA 1 do Anonymous] _G.PingLimit lido dinamicamente no loop
+-- O valor é atualizado em tempo real conforme o usuário digita no TextBox
+_G.PingLimit = 0
+
 coroutine.wrap(function()
     while true do
         local totalWeights = 0
@@ -1203,10 +1204,18 @@ coroutine.wrap(function()
     end
 end)()
 
+-- Atualiza _G.PingLimit dinamicamente toda vez que o texto muda
+TextBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local value = tonumber(TextBox.Text)
+    if value then
+        _G.PingLimit = value
+    end
+end)
+
 coroutine.wrap(function()
     while true do
-        local pingLimitValue = tonumber(TextBox.Text)
-        if pingLimitValue then
+        local pingLimitValue = _G.PingLimit
+        if pingLimitValue and pingLimitValue > 0 then
             mostrapingsetadonatextbox.Text = 'Set To: ' .. FormatNumber(pingLimitValue, 0)
         else
             mostrapingsetadonatextbox.Text = 'Set To:'
@@ -1217,7 +1226,7 @@ end)()
 
 _G.pingFarmLoop = false
 
-local function RunPingFarmLoop(pingLimitValue)
+local function RunPingFarmLoop()
     local StatsService = game:GetService('Stats')
     local isPingStopped = false
     local isFarmActive = false
@@ -1259,15 +1268,17 @@ local function RunPingFarmLoop(pingLimitValue)
 
     StartFarming2()
 
-    local checkInterval = 0.00092 * (_G.totalWeightsPing or 0)
-
-    while true do
+    -- [MELHORIA 1] Lê _G.PingLimit dinamicamente a cada iteração do loop
+    -- Permite alterar o limite de ping enquanto o farm está rodando
+    while _G.pingFarmLoop do
+        local checkInterval = 0.00092 * (_G.totalWeightsPing or 0)
         local ok, currentPing = pcall(function()
             return StatsService.Network.ServerStatsItem['Data Ping']:GetValue()
         end)
 
         if ok then
-            if pingLimitValue and pingLimitValue <= currentPing and not isPingStopped then
+            local pingLimitValue = _G.PingLimit  -- leitura dinâmica a cada loop
+            if pingLimitValue > 0 and pingLimitValue <= currentPing and not isPingStopped then
                 game:GetService('StarterGui'):SetCore('SendNotification', {
                     Title = 'Ping Limiter!',
                     Text = 'Farm Parado - Ping acima do limite',
@@ -1275,7 +1286,7 @@ local function RunPingFarmLoop(pingLimitValue)
                 })
                 StopFarming2()
                 isPingStopped = true
-            elseif pingLimitValue and currentPing < pingLimitValue and isPingStopped then
+            elseif pingLimitValue > 0 and currentPing < pingLimitValue and isPingStopped then
                 game:GetService('StarterGui'):SetCore('SendNotification', {
                     Title = 'Ping Limiter!',
                     Text = 'Farm Retomado - Ping abaixo do limite',
@@ -1294,10 +1305,9 @@ end
 
 Farm_2.MouseButton1Click:Connect(function()
     if _G.pingFarmLoop then return end
-    local pingLimitValue = tonumber(TextBox.Text)
     _G.pingFarmLoop = true
     coroutine.wrap(function()
-        RunPingFarmLoop(pingLimitValue)
+        RunPingFarmLoop()
     end)()
 end)
 
@@ -1306,26 +1316,24 @@ StopFarm_2.MouseButton1Click:Connect(function()
     _G.farmer2 = false
 end)
 
+-- [MELHORIA 2 do Anonymous] Auto Farm agora espera _G.dupeFinished == true
+-- em vez de uma quantidade de pesos no TextBox_2
+-- Integração direta com o fluxo do Dupe tab
 local autoFarmEnabled = false
 AutoFarm.MouseButton1Click:Connect(function()
     autoFarmEnabled = not autoFarmEnabled
     if autoFarmEnabled then
         AutoFarm.Text = "Auto Farm On"
         coroutine.wrap(function()
-            local targetCount = tonumber(TextBox_2.Text) or 0
-            if targetCount > 0 then
-                repeat
-                    task.wait(1)
-                    if not autoFarmEnabled then return end
-                    local count = 0
-                    for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
-                        if item.Name == 'Double Weight' then count = count + 1 end
-                    end
-                until count >= targetCount or not autoFarmEnabled
-            end
+            -- Espera o dupe terminar via flag _G.dupeFinished
+            repeat
+                task.wait(1)
+                if not autoFarmEnabled then return end
+            until _G.dupeFinished == true or not autoFarmEnabled
 
             if not autoFarmEnabled then return end
 
+            -- Equipa todos os pesos em lotes de 50
             local totalEquipped = 0
             local equiping = true
             while equiping and autoFarmEnabled do
@@ -1355,9 +1363,9 @@ AutoFarm.MouseButton1Click:Connect(function()
                 Duration = 3,
             })
 
-            local pingLimitValue = tonumber(TextBox.Text)
+            -- Inicia Ping Farm com _G.PingLimit dinâmico
             _G.pingFarmLoop = true
-            RunPingFarmLoop(pingLimitValue)
+            RunPingFarmLoop()
         end)()
     else
         AutoFarm.Text = "Auto Farm Off"
@@ -1437,6 +1445,9 @@ end)
 -- TAB 3 - DUPE
 -- ============================================================
 
+-- Reseta a flag ao iniciar
+_G.dupeFinished = false
+
 coroutine.wrap(function()
     while true do
         local totalWeights = 0
@@ -1457,6 +1468,9 @@ Dupe.MouseButton1Click:Connect(function()
     local gamePassID = 5949054
     local inputText = TextBox_2.Text
     local targetWeightCount = tonumber(inputText) or 0
+
+    -- Reseta a flag ao iniciar novo dupe
+    _G.dupeFinished = false
 
     local function CountDoubleWeights()
         local weightCount = 0
@@ -1494,6 +1508,8 @@ Dupe.MouseButton1Click:Connect(function()
                 PromptGamePassPurchase(gamePassID)
                 if targetWeightCount <= CountDoubleWeights() then
                     CounterDw.Text = 'Time: Dupe Complete!'
+                    -- [MELHORIA 2] Seta a flag para o Auto Farm saber que o dupe terminou
+                    _G.dupeFinished = true
                     return
                 end
             end
@@ -1503,6 +1519,8 @@ Dupe.MouseButton1Click:Connect(function()
                 Duration = 5,
             })
             CounterDw.Text = 'Time: Done!'
+            -- [MELHORIA 2] Seta a flag ao fim do countdown também
+            _G.dupeFinished = true
         end)()
     else
         CounterDw.Text = 'Time: --'
@@ -1745,7 +1763,6 @@ end)
 -- TAB 5 - INFO / STATS
 -- ============================================================
 
--- SPS/SPM/SPH/SPD/SPW com 2 casas decimais
 coroutine.wrap(function()
     local StrengthValue = LocalPlayer.leaderstats and LocalPlayer.leaderstats.Strength
     if not StrengthValue then
@@ -1769,16 +1786,18 @@ coroutine.wrap(function()
     end
 end)()
 
--- Time Farming
 coroutine.wrap(function()
     local startTime = nil
+    local accumulatedTime = 0  -- tempo acumulado antes de pausas
+    local wasActive = false    -- estado anterior do farm
 
     local function FormatTime(t)
         return string.format('%02i', t)
     end
     local function ConvertToDHMS(seconds)
-        local minutes = math.floor(seconds / 60)
-        local remainingSeconds = seconds % 60
+        local s = math.floor(seconds)
+        local minutes = math.floor(s / 60)
+        local remainingSeconds = s % 60
         local hours = math.floor(minutes / 60)
         local remainingMinutes = minutes % 60
         local days = math.floor(hours / 24)
@@ -1787,17 +1806,29 @@ coroutine.wrap(function()
     end
 
     while true do
-        if _G.farmer or _G.farmer2 then
-            if not startTime then startTime = os.time() end
-            local elapsedTime = os.time() - startTime
+        local isActive = _G.farmer or _G.farmer2
+
+        if isActive and not wasActive then
+            -- Farm acabou de retomar: inicia contagem a partir do acumulado
+            startTime = os.clock()
+        elseif not isActive and wasActive then
+            -- Farm acabou de pausar: salva o tempo rodado até agora
+            if startTime then
+                accumulatedTime = accumulatedTime + (os.clock() - startTime)
+                startTime = nil
+            end
+        end
+
+        if isActive and startTime then
+            local elapsedTime = accumulatedTime + (os.clock() - startTime)
             Spw_2.Text = 'Time Farming: ' .. ConvertToDHMS(elapsedTime)
         end
-        task.wait(1)
+
+        wasActive = isActive
+        task.wait(0.5)
     end
 end)()
 
--- FIX: Força Total — trunca, nunca arredonda para cima
--- Ex: 59860900800 → "59860900800 | 59.86B"  (jamais "59.90B")
 coroutine.wrap(function()
     while true do
         pcall(function()
@@ -1809,7 +1840,6 @@ coroutine.wrap(function()
     end
 end)()
 
--- FIX: Size — 2 casas decimais, truncado
 coroutine.wrap(function()
     while true do
         pcall(function()
@@ -1820,7 +1850,6 @@ coroutine.wrap(function()
     end
 end)()
 
--- FIX: You Earned — 2 casas decimais, truncado
 coroutine.wrap(function()
     local StrengthValue
     repeat wait(1) until LocalPlayer.leaderstats and LocalPlayer.leaderstats:FindFirstChild('Strength')
